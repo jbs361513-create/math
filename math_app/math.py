@@ -32,14 +32,37 @@ SAFE_NAMES = {
     "arcsin": np.arcsin, "arccos": np.arccos, "arctan": np.arctan,
 }
 
+def preprocess(expr: str) -> str:
+    """
+    수학 표기 → 파이썬 표기 자동 변환
+      2x      → 2*x
+      3x^2    → 3*x**2
+      2(x+1)  → 2*(x+1)
+      (x+1)(x-2) → (x+1)*(x-2)
+      x^3     → x**3
+      ^       → **
+      π       → pi
+    """
+    s = expr.strip()
+    s = s.replace("π", "pi").replace("×", "*").replace("÷", "/")
+    s = _re.sub(r'\^', '**', s)
+    # 숫자 뒤에 바로 x 또는 ( → 곱셈 삽입: 2x → 2*x, 2( → 2*(
+    s = _re.sub(r'(\d)([a-zA-Z(])', r'\1*\2', s)
+    # ) 뒤에 바로 x 또는 ( → 곱셈 삽입: )(  → )*(
+    s = _re.sub(r'(\))([a-zA-Z(])', r'\1*\2', s)
+    # x 뒤에 바로 ( → 함수 호출이 아닌 곱셈: x( → x*(  (단 함수명은 건드리지 않음)
+    s = _re.sub(r'(?<![a-zA-Z])(x)\(', r'\1*(', s)
+    return s
+
 def safe_eval(expr_str: str, x_arr: np.ndarray):
     """수식 문자열을 numpy 배열에 적용. 결과는 complex 배열."""
+    processed = preprocess(expr_str)
     env = {**SAFE_NAMES, "x": x_arr.astype(complex)}
     try:
-        result = eval(compile(expr_str, "<string>", "eval"), {"__builtins__": {}}, env)
+        result = eval(compile(processed, "<string>", "eval"), {"__builtins__": {}}, env)
         return np.asarray(result, dtype=complex)
     except Exception as ex:
-        raise ValueError(f"수식 오류: {ex}")
+        raise ValueError(f"수식 오류 ({processed}): {ex}")
 
 def parse_function(fn_type: str, inner: str, p: int, q: int, x_arr: np.ndarray):
     """
@@ -348,21 +371,27 @@ for i, (g, W, Re_W, Im_W) in enumerate(results):
 
 with st.expander("수식 작성 도움말"):
     st.markdown("""
-**사용 가능한 표현식**
+**자연스러운 수학 표기 그대로 입력 가능**
 
-| 표현 | 예시 |
+| 입력 | 의미 |
 |------|------|
-| 기본 사칙연산 | `x**2 - 3*x + 1` |
-| 삼각함수 | `sin(x)`, `cos(x)`, `tan(x)` |
-| 지수/로그 | `exp(x)`, `log(x)`, `log10(x)` |
-| 상수 | `pi`, `e` |
-| 절댓값 | `abs(x)` |
+| `2x-3` | 2x − 3 |
+| `3x^2 - 1` | 3x² − 1 |
+| `2(x+1)` | 2(x+1) |
+| `(x-1)(x+1)` | (x−1)(x+1) |
+| `x^3` | x³ |
+| `π` | 원주율 |
+
+**사용 가능한 함수**
+
+`sin(x)` · `cos(x)` · `tan(x)` · `exp(x)` · `log(x)` · `log10(x)` · `abs(x)` · `sqrt(x)`
 
 **함수 유형 예시**
 
-| 유형 | 수식 예시 | 결과 |
+| 유형 | 수식 입력 | 결과 |
 |------|-----------|------|
-| √( ) | `x**2 - 4` | √(x²−4), x∈(−2,2) → 복소수 |
+| √( ) | `2x - 3` | √(2x−3) |
+| √( ) | `x^2 - 4` | √(x²−4) |
 | ∛( ) | `x - 1` | ∛(x−1) |
 | ( )^(p/q) | `x`, p=3, q=4 | x^(3/4) |
     """)
