@@ -66,11 +66,14 @@ def safe_eval(expr_str: str, x_arr: np.ndarray):
 
 def parse_function(fn_type: str, inner: str, p: int, q: int, x_arr: np.ndarray):
     """
-    fn_type : "sqrt" | "cbrt" | "pq"
-    inner   : 근호 안 수식 문자열
+    fn_type : "sqrt" | "cbrt" | "pq" | "expr"
+    inner   : 수식 문자열
     p, q    : p/q 지수 (fn_type=="pq" 일 때)
     """
-    w = safe_eval(inner, x_arr)          # 복소수 배열
+    if fn_type == "expr":
+        return safe_eval(inner, x_arr)
+
+    w = safe_eval(inner, x_arr)
     r  = np.abs(w)
     th = np.angle(w)
 
@@ -78,7 +81,7 @@ def parse_function(fn_type: str, inner: str, p: int, q: int, x_arr: np.ndarray):
         exp = 0.5
     elif fn_type == "cbrt":
         exp = 1/3
-    else:                                # pq
+    else:
         exp = p / q
 
     return (r ** exp) * np.exp(1j * exp * th)
@@ -114,30 +117,36 @@ with st.expander("➕  새 그래프 추가", expanded=False):
     with c1:
         new_type = st.selectbox(
             "함수 유형",
-            ["sqrt  √( )", "cbrt  ∛( )", "pq  ( )^(p/q)"],
+            ["expr  f(x)", "sqrt  √( )", "cbrt  ∛( )", "pq  ( )^(p/q)"],
             key="new_type",
         )
     with c2:
+        inner_label = "수식 f(x)" if fn_type_key == "expr" else "근호 안 수식"
         new_inner = st.text_input(
-            "근호 안 수식",
-            value="x**2 - 1",
+            inner_label,
+            value="x - 3" if fn_type_key == "expr" else "x**2 - 1",
             key="new_inner",
-            help="x, sin, cos, exp, log, pi, e 등 사용 가능",
+            help="x, sin, cos, exp, log, pi, e 등 사용 가능 / 2x-3, x^2 형태도 OK",
         )
 
-    cp, cq = st.columns(2)
-    with cp:
-        new_p = st.number_input("p (분자)", value=2, min_value=1, step=1, key="new_p")
-    with cq:
-        new_q = st.number_input("q (분모)", value=3, min_value=1, step=1, key="new_q")
+    if fn_type_key == "pq":
+        cp, cq = st.columns(2)
+        with cp:
+            new_p = st.number_input("p (분자)", value=2, min_value=1, step=1, key="new_p")
+        with cq:
+            new_q = st.number_input("q (분모)", value=3, min_value=1, step=1, key="new_q")
+    else:
+        new_p, new_q = 2, 3
 
     new_label = st.text_input("범례 이름 (선택)", value="", key="new_label",
                                placeholder="비워두면 자동 생성")
 
-    fn_type_key = new_type.split()[0]   # "sqrt" | "cbrt" | "pq"
+    fn_type_key = new_type.split()[0]   # "expr" | "sqrt" | "cbrt" | "pq"
 
     # 미리보기 레이블
-    if fn_type_key == "sqrt":
+    if fn_type_key == "expr":
+        auto_label = f"f(x) = {new_inner}"
+    elif fn_type_key == "sqrt":
         auto_label = f"√({new_inner})"
     elif fn_type_key == "cbrt":
         auto_label = f"∛({new_inner})"
@@ -194,8 +203,8 @@ if st.session_state.graphs:
                 ec1, ec2 = st.columns([1, 2])
                 with ec1:
                     e_type = st.selectbox(
-                        "유형", ["sqrt  √( )", "cbrt  ∛( )", "pq  ( )^(p/q)"],
-                        index=["sqrt","cbrt","pq"].index(g["fn_type"]),
+                        "유형", ["expr  f(x)", "sqrt  √( )", "cbrt  ∛( )", "pq  ( )^(p/q)"],
+                        index=["expr","sqrt","cbrt","pq"].index(g["fn_type"]),
                         key=f"etype_{idx}"
                     )
                 with ec2:
