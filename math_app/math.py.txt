@@ -1,0 +1,252 @@
+"""
+복소수 무리함수 3D 시각화 앱
+-------------------------------
+실수 축 x, y 와 허수 축 Im(f) 를 3개의 축으로 표현
+지원 함수: √(x+iy), ∛(x+iy), (x+iy)^(2/3), √(x²+iy), √(x+iy²)
+
+실행 방법:
+    pip install numpy matplotlib
+    python complex_irrational_3d.py
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.widgets import RadioButtons, Slider, CheckButtons
+from matplotlib import cm
+
+
+# ─────────────────────────────────────────
+# 무리함수 정의 (주치 사용)
+# ─────────────────────────────────────────
+def f_sqrt(z):
+    """√z  (주 제곱근)"""
+    return np.sqrt(z.astype(complex))
+
+def f_cbrt(z):
+    """∛z  (주 세제곱근)"""
+    z = z.astype(complex)
+    r = np.abs(z)
+    theta = np.angle(z)
+    return r**(1/3) * np.exp(1j * theta / 3)
+
+def f_pow23(z):
+    """z^(2/3)  = (∛z)²"""
+    z = z.astype(complex)
+    r = np.abs(z)
+    theta = np.angle(z)
+    return r**(2/3) * np.exp(1j * 2 * theta / 3)
+
+def f_sqrt_x2iy(z):
+    """√(x²+iy)  : x=Re(z), y=Im(z) → w = x²+iy"""
+    x = np.real(z)
+    y = np.imag(z)
+    w = x**2 + 1j * y
+    return np.sqrt(w)
+
+def f_sqrt_xiiy2(z):
+    """√(x+iy²)  : w = x+iy²"""
+    x = np.real(z)
+    y = np.imag(z)
+    w = x + 1j * y**2
+    return np.sqrt(w)
+
+FUNCTIONS = {
+    "√z  (주 제곱근)":   f_sqrt,
+    "∛z  (세제곱근)":    f_cbrt,
+    "z^(2/3)":           f_pow23,
+    "√(x²+iy)":          f_sqrt_x2iy,
+    "√(x+iy²)":          f_sqrt_xiiy2,
+}
+
+
+# ─────────────────────────────────────────
+# 그리드 생성 및 계산
+# ─────────────────────────────────────────
+def make_grid(rng=3.0, n=120):
+    x = np.linspace(-rng, rng, n)
+    y = np.linspace(-rng, rng, n)
+    X, Y = np.meshgrid(x, y)
+    Z = X + 1j * Y
+    return X, Y, Z
+
+def compute(fn_name, X, Y, Z):
+    fn = FUNCTIONS[fn_name]
+    W = fn(Z)
+    Re_W = np.real(W)
+    Im_W = np.imag(W)
+    Abs_W = np.abs(W)
+    return Re_W, Im_W, Abs_W
+
+
+# ─────────────────────────────────────────
+# 앱 메인
+# ─────────────────────────────────────────
+class ComplexApp:
+    def __init__(self):
+        self.fn_name = list(FUNCTIONS.keys())[0]
+        self.rng = 3.0
+        self.show_re = True
+        self.show_im = True
+        self.cmap = "plasma"
+
+        self.fig = plt.figure(figsize=(14, 8))
+        self.fig.patch.set_facecolor("#0e1117")
+        self.fig.suptitle(
+            "복소수 무리함수 3D 시각화\n"
+            "축: x (실수 입력), y (허수 입력), Im(f) (함수 허수값) / 색상: |f(z)|",
+            color="white", fontsize=11, y=0.98
+        )
+
+        # 3D 축
+        self.ax3d = self.fig.add_axes([0.28, 0.12, 0.70, 0.80], projection="3d")
+        self._style_ax()
+
+        # 컨트롤 패널
+        self._build_controls()
+
+        self._redraw()
+        plt.show()
+
+    def _style_ax(self):
+        ax = self.ax3d
+        ax.set_facecolor("#0e1117")
+        for pane in [ax.xaxis.pane, ax.yaxis.pane, ax.zaxis.pane]:
+            pane.fill = False
+            pane.set_edgecolor("#333")
+        ax.tick_params(colors="white", labelsize=8)
+        ax.xaxis.label.set_color("white")
+        ax.yaxis.label.set_color("white")
+        ax.zaxis.label.set_color("white")
+
+    def _build_controls(self):
+        fig = self.fig
+        fn_labels = list(FUNCTIONS.keys())
+
+        # 함수 선택 라디오
+        ax_radio = fig.add_axes([0.01, 0.52, 0.25, 0.38], facecolor="#1a1d27")
+        ax_radio.set_title("함수 선택", color="white", fontsize=9, pad=4)
+        self.radio = RadioButtons(
+            ax_radio, fn_labels,
+            activecolor="#6fa8dc"
+        )
+        for lbl in self.radio.labels:
+            lbl.set_fontsize(9)
+            lbl.set_color("white")
+        self.radio.on_clicked(self._on_fn_change)
+
+        # x,y 범위 슬라이더
+        ax_rng = fig.add_axes([0.05, 0.42, 0.18, 0.03], facecolor="#1a1d27")
+        self.sl_rng = Slider(ax_rng, "범위 ±", 1.0, 8.0, valinit=self.rng,
+                             color="#6fa8dc")
+        self.sl_rng.label.set_color("white")
+        self.sl_rng.valtext.set_color("white")
+        self.sl_rng.on_changed(self._on_rng_change)
+
+        # 투명도 슬라이더
+        ax_alpha = fig.add_axes([0.05, 0.34, 0.18, 0.03], facecolor="#1a1d27")
+        self.sl_alpha = Slider(ax_alpha, "투명도", 0.1, 1.0, valinit=0.80,
+                               color="#6fa8dc")
+        self.sl_alpha.label.set_color("white")
+        self.sl_alpha.valtext.set_color("white")
+        self.sl_alpha.on_changed(self._on_alpha_change)
+
+        # 표면 체크박스 (실수부 / 허수부)
+        ax_chk = fig.add_axes([0.03, 0.18, 0.22, 0.12], facecolor="#1a1d27")
+        ax_chk.set_title("표면 표시", color="white", fontsize=9, pad=4)
+        self.chk = CheckButtons(
+            ax_chk,
+            ["Re(f) 실수부 곡면", "Im(f) 허수부 곡면"],
+            [True, True]
+        )
+        for txt in self.chk.labels:
+            txt.set_fontsize(9)
+            txt.set_color("white")
+        self.chk.on_clicked(self._on_chk_change)
+
+        # 범례 텍스트
+        ax_leg = fig.add_axes([0.01, 0.02, 0.26, 0.14], facecolor="#1a1d27")
+        ax_leg.axis("off")
+        legend_txt = (
+            "파란 곡면 → Re(f(z))\n"
+            "주황 곡면 → Im(f(z))\n"
+            "색상 → |f(z)| 절댓값\n\n"
+            "마우스 드래그: 회전\n"
+            "스크롤: 확대/축소"
+        )
+        ax_leg.text(0.05, 0.92, legend_txt, transform=ax_leg.transAxes,
+                    color="#aaaaaa", fontsize=8, va="top",
+                    fontfamily="monospace")
+
+    def _redraw(self):
+        ax = self.ax3d
+        ax.cla()
+        self._style_ax()
+
+        X, Y, Z = make_grid(self.rng, n=100)
+        Re_W, Im_W, Abs_W = compute(self.fn_name, X, Y, Z)
+
+        alpha = self.sl_alpha.val
+        norm = plt.Normalize(Abs_W.min(), Abs_W.max())
+
+        if self.show_re:
+            ax.plot_surface(
+                X, Y, Re_W,
+                facecolors=cm.Blues(norm(Abs_W)),
+                alpha=alpha * 0.85,
+                linewidth=0, antialiased=True,
+                label="Re(f)"
+            )
+
+        if self.show_im:
+            ax.plot_surface(
+                X, Y, Im_W,
+                facecolors=cm.Oranges(norm(Abs_W)),
+                alpha=alpha * 0.75,
+                linewidth=0, antialiased=True,
+                label="Im(f)"
+            )
+
+        # 축 레이블
+        ax.set_xlabel("x  (실수 입력)", labelpad=6)
+        ax.set_ylabel("y  (허수 입력)", labelpad=6)
+        ax.set_zlabel("Im(f)  [파:Re / 주:Im]", labelpad=6)
+        ax.set_title(
+            f"f(z) = {self.fn_name}   |   z = x + iy",
+            color="white", fontsize=10, pad=10
+        )
+
+        # 컬러바
+        mappable = cm.ScalarMappable(norm=norm, cmap="plasma")
+        mappable.set_array(Abs_W)
+        if hasattr(self, "_cbar"):
+            self._cbar.remove()
+        self._cbar = self.fig.colorbar(
+            mappable, ax=ax, shrink=0.5, aspect=12, pad=0.02
+        )
+        self._cbar.set_label("|f(z)| 절댓값", color="white", fontsize=8)
+        self._cbar.ax.yaxis.set_tick_params(color="white")
+        plt.setp(self._cbar.ax.yaxis.get_ticklabels(), color="white", fontsize=7)
+
+        self.fig.canvas.draw_idle()
+
+    # 이벤트 핸들러
+    def _on_fn_change(self, label):
+        self.fn_name = label
+        self._redraw()
+
+    def _on_rng_change(self, val):
+        self.rng = val
+        self._redraw()
+
+    def _on_alpha_change(self, val):
+        self._redraw()
+
+    def _on_chk_change(self, label):
+        states = self.chk.get_status()
+        self.show_re = states[0]
+        self.show_im = states[1]
+        self._redraw()
+
+
+if __name__ == "__main__":
+    ComplexApp()
