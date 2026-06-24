@@ -1,7 +1,7 @@
 """
-복소수 무리함수 3D 시각화 - Streamlit 버전
+복소수 무리함수 3D 시각화 - Streamlit 버전 (평행이동 기능 추가)
 사용자 정의 수식 √(expr), ∛(expr), expr^(p/q) 지원
-여러 함수 동시 비교 가능
+여러 함수 동시 비교 및 각 함수별 3D 평행이동 지원
 """
 
 import numpy as np
@@ -10,14 +10,14 @@ import streamlit as st
 import re as _re
 
 st.set_page_config(
-    page_title="복소수 무리함수 시각화",
+    page_title="복소수 무리함수 시각화 (평행이동)",
     page_icon="🔢",
     layout="wide",
 )
 
 st.title("복소수 무리함수 3D 시각화")
 st.markdown(
-    "실수 **x** 입력 → f(x) 의 **실수부(y축)** 와 **허수부(z축)** 를 3D 곡선으로 표시"
+    "실수 **x** 입력 → f(x) 의 **실수부(y축)** 와 **허수부(z축)** 를 3D 곡선으로 표시 (함수별 평행이동 가능)"
 )
 
 # ── 수식 파서 ──────────────────────────────────────────────────
@@ -33,29 +33,15 @@ SAFE_NAMES = {
 }
 
 def preprocess(expr: str) -> str:
-    """
-    수학 표기 → 파이썬 표기 자동 변환
-      2x      → 2*x
-      3x^2    → 3*x**2
-      2(x+1)  → 2*(x+1)
-      (x+1)(x-2) → (x+1)*(x-2)
-      x^3     → x**3
-      ^       → **
-      π       → pi
-    """
     s = expr.strip()
     s = s.replace("π", "pi").replace("×", "*").replace("÷", "/")
     s = _re.sub(r'\^', '**', s)
-    # 숫자 뒤에 바로 x 또는 ( → 곱셈 삽입: 2x → 2*x, 2( → 2*(
     s = _re.sub(r'(\d)([a-zA-Z(])', r'\1*\2', s)
-    # ) 뒤에 바로 x 또는 ( → 곱셈 삽입: )(  → )*(
     s = _re.sub(r'(\))([a-zA-Z(])', r'\1*\2', s)
-    # x 뒤에 바로 ( → 함수 호출이 아닌 곱셈: x( → x*(  (단 함수명은 건드리지 않음)
     s = _re.sub(r'(?<![a-zA-Z])(x)\(', r'\1*(', s)
     return s
 
 def safe_eval(expr_str: str, x_arr: np.ndarray):
-    """수식 문자열을 numpy 배열에 적용. 결과는 complex 배열."""
     processed = preprocess(expr_str)
     env = {**SAFE_NAMES, "x": x_arr.astype(complex)}
     try:
@@ -64,27 +50,33 @@ def safe_eval(expr_str: str, x_arr: np.ndarray):
     except Exception as ex:
         raise ValueError(f"수식 오류 ({processed}): {ex}")
 
-def parse_function(fn_type: str, inner: str, p: int, q: int, x_arr: np.ndarray):
+def parse_function(fn_type: str, inner: str, p: int, q: int, x_arr: np.ndarray, 
+                   x_shift: float = 0.0, y_shift: float = 0.0, z_shift: float = 0.0):
     """
-    fn_type : "sqrt" | "cbrt" | "pq" | "expr"
-    inner   : 수식 문자열
-    p, q    : p/q 지수 (fn_type=="pq" 일 때)
+    평행이동(x_shift, y_shift, z_shift) 매개변수 추가
     """
+    # 1. X축 평행이동 반영 (수학적으로 f(x - a) 형태가 되도록 x 대신 x - x_shift 대입)
+    adjusted_x = x_arr - x_shift
+
     if fn_type == "expr":
-        return safe_eval(inner, x_arr)
-
-    w = safe_eval(inner, x_arr)
-    r  = np.abs(w)
-    th = np.angle(w)
-
-    if fn_type == "sqrt":
-        exp = 0.5
-    elif fn_type == "cbrt":
-        exp = 1/3
+        w = safe_eval(inner, adjusted_x)
     else:
-        exp = p / q
+        w_inner = safe_eval(inner, adjusted_x)
+        r  = np.abs(w_inner)
+        th = np.angle(w_inner)
 
-    return (r ** exp) * np.exp(1j * exp * th)
+        if fn_type == "sqrt":
+            exp = 0.5
+        elif fn_type == "cbrt":
+            exp = 1/3
+        else:
+            exp = p / q
+        w = (r ** exp) * np.exp(1j * exp * th)
+    
+    # 2. Y축(실수부), Z축(허수부) 평행이동 반영 (+b, +c 형태)
+    # 복소수 형태로 더해주면 Re(w) + y_shift, Im(w) + z_shift 가 동시에 처리됩니다.
+    return w + (y_shift + 1j * z_shift)
+
 
 # ── 색상 팔레트 ────────────────────────────────────────────────
 COLORS = ["#3b82f6","#f97316","#22c55e","#a855f7",
@@ -93,7 +85,10 @@ COLORS = ["#3b82f6","#f97316","#22c55e","#a855f7",
 # ── 세션 스테이트: 그래프 목록 ────────────────────────────────
 if "graphs" not in st.session_state:
     st.session_state.graphs = [
-        {"fn_type":"sqrt","inner":"x","p":2,"q":3,"label":"√x","active":True},
+        {
+            "fn_type": "sqrt", "inner": "x", "p": 2, "q": 3, "label": "√x", "active": True,
+            "x_shift": 0.0, "y_shift": 0.0, "z_shift": 0.0
+        },
     ]
 
 # ── 사이드바 ──────────────────────────────────────────────────
@@ -118,53 +113,51 @@ with st.expander("➕  새 그래프 추가", expanded=False):
         ["expr  f(x)", "sqrt  √( )", "cbrt  ∛( )", "pq  ( )^(p/q)"],
         key="new_type",
     )
-    fn_type_key = new_type.split()[0]   # "expr" | "sqrt" | "cbrt" | "pq"
+    fn_type_key = new_type.split()[0]
 
     inner_label = "수식 f(x)" if fn_type_key == "expr" else "근호 안 수식"
     inner_default = "x - 3" if fn_type_key == "expr" else "x**2 - 1"
     new_inner = st.text_input(
-        inner_label,
-        value=inner_default,
-        key="new_inner",
-        help="x, sin, cos, exp, log, pi, e 등 사용 가능 / 2x-3, x^2 형태도 OK",
+        inner_label, value=inner_default, key="new_inner",
+        help="x, sin, cos, exp, log, pi, e 등 사용 가능",
     )
 
     if fn_type_key == "pq":
         cp, cq = st.columns(2)
-        with cp:
-            new_p = st.number_input("p (분자)", value=2, min_value=1, step=1, key="new_p")
-        with cq:
-            new_q = st.number_input("q (분모)", value=3, min_value=1, step=1, key="new_q")
+        with cp: new_p = st.number_input("p (분자)", value=2, min_value=1, step=1, key="new_p")
+        with cq: new_q = st.number_input("q (분모)", value=3, min_value=1, step=1, key="new_q")
     else:
         new_p, new_q = 2, 3
 
-    new_label = st.text_input("범례 이름 (선택)", value="", key="new_label",
-                               placeholder="비워두면 자동 생성")
+    # 평행이동 입력 UI 추가
+    st.markdown("**평행이동 설정**")
+    sh1, sh2, sh3 = st.columns(3)
+    with sh1: new_xs = st.number_input("X축 이동 (x축 방향)", value=0.0, step=0.5, key="new_xs")
+    with sh2: new_ys = st.number_input("Y축 이동 (Re 방향)", value=0.0, step=0.5, key="new_ys")
+    with sh3: new_zs = st.number_input("Z축 이동 (Im 방향)", value=0.0, step=0.5, key="new_zs")
 
-    # 미리보기 레이블
-    if fn_type_key == "expr":
-        auto_label = f"f(x) = {new_inner}"
-    elif fn_type_key == "sqrt":
-        auto_label = f"√({new_inner})"
-    elif fn_type_key == "cbrt":
-        auto_label = f"∛({new_inner})"
-    else:
-        auto_label = f"({new_inner})^({new_p}/{new_q})"
+    new_label = st.text_input("범례 이름 (선택)", value="", key="new_label", placeholder="비워두면 자동 생성")
 
-    final_label = new_label.strip() or auto_label
+    if fn_type_key == "expr": auto_label = f"f(x) = {new_inner}"
+    elif fn_type_key == "sqrt": auto_label = f"√({new_inner})"
+    elif fn_type_key == "cbrt": auto_label = f"∛({new_inner})"
+    else: auto_label = f"({new_inner})^({new_p}/{new_q})"
+
+    shift_info = ""
+    if new_xs != 0 or new_ys != 0 or new_zs != 0:
+        shift_info = f" (이동: {new_xs}, {new_ys}, {new_zs})"
+
+    final_label = (new_label.strip() or auto_label) + shift_info
     st.caption(f"레이블 미리보기: **{final_label}**")
 
     if st.button("그래프 추가 ↗"):
         try:
             test_x = np.array([1.0])
-            parse_function(fn_type_key, new_inner, int(new_p), int(new_q), test_x)
+            parse_function(fn_type_key, new_inner, int(new_p), int(new_q), test_x, new_xs, new_ys, new_zs)
             st.session_state.graphs.append({
-                "fn_type": fn_type_key,
-                "inner":   new_inner,
-                "p":       int(new_p),
-                "q":       int(new_q),
-                "label":   final_label,
-                "active":  True,
+                "fn_type": fn_type_key, "inner": new_inner, "p": int(new_p), "q": int(new_q),
+                "label": final_label, "active": True,
+                "x_shift": float(new_xs), "y_shift": float(new_ys), "z_shift": float(new_zs)
             })
             st.success(f"'{final_label}' 추가됨!")
             st.rerun()
@@ -180,50 +173,52 @@ if st.session_state.graphs:
     for idx, g in enumerate(st.session_state.graphs):
         col_chk, col_info, col_edit, col_del = st.columns([0.5, 3, 1.5, 1])
         with col_chk:
-            g["active"] = st.checkbox("", value=g["active"], key=f"chk_{idx}",
-                                       label_visibility="collapsed")
+            g["active"] = st.checkbox("", value=g["active"], key=f"chk_{idx}", label_visibility="collapsed")
         with col_info:
             color_dot = f'<span style="color:{COLORS[idx % len(COLORS)]};font-size:18px">●</span>'
             st.markdown(f'{color_dot} **{g["label"]}**', unsafe_allow_html=True)
-
         with col_edit:
             if st.button("수정", key=f"edit_{idx}"):
                 st.session_state[f"editing_{idx}"] = not st.session_state.get(f"editing_{idx}", False)
-
         with col_del:
             if st.button("삭제", key=f"del_{idx}"):
                 to_delete.append(idx)
 
-        # 인라인 수정 폼
+        # 인라인 수정 폼 (평행이동 항목 포함)
         if st.session_state.get(f"editing_{idx}", False):
             with st.container():
                 ec1, ec2 = st.columns([1, 2])
                 with ec1:
                     e_type = st.selectbox(
                         "유형", ["expr  f(x)", "sqrt  √( )", "cbrt  ∛( )", "pq  ( )^(p/q)"],
-                        index=["expr","sqrt","cbrt","pq"].index(g["fn_type"]),
-                        key=f"etype_{idx}"
+                        index=["expr","sqrt","cbrt","pq"].index(g["fn_type"]), key=f"etype_{idx}"
                     )
-                with ec2:
-                    e_inner = st.text_input("수식", value=g["inner"], key=f"einner_{idx}")
+                with ec2: e_inner = st.text_input("수식", value=g["inner"], key=f"einner_{idx}")
 
                 ep, eq_ = st.columns(2)
-                with ep:
-                    e_p = st.number_input("p", value=g["p"], min_value=1, key=f"ep_{idx}")
-                with eq_:
-                    e_q = st.number_input("q", value=g["q"], min_value=1, key=f"eq_{idx}")
+                with ep: e_p = st.number_input("p", value=g["p"], min_value=1, key=f"ep_{idx}")
+                with eq_: e_q = st.number_input("q", value=g["q"], min_value=1, key=f"eq_{idx}")
+
+                st.markdown("  └ 평행이동 수정")
+                esh1, esh2, esh3 = st.columns(3)
+                with esh1: e_xs = st.number_input("X축 이동", value=g.get("x_shift", 0.0), step=0.5, key=f"exs_{idx}")
+                with esh2: e_ys = st.number_input("Y축 이동(Re)", value=g.get("y_shift", 0.0), step=0.5, key=f"eys_{idx}")
+                with esh3: e_zs = st.number_input("Z축 이동(Im)", value=g.get("z_shift", 0.0), step=0.5, key=f"ezs_{idx}")
 
                 e_label = st.text_input("레이블", value=g["label"], key=f"elabel_{idx}")
 
                 if st.button("저장", key=f"save_{idx}"):
                     try:
                         e_fn_type = e_type.split()[0]
-                        parse_function(e_fn_type, e_inner, int(e_p), int(e_q), np.array([1.0]))
+                        parse_function(e_fn_type, e_inner, int(e_p), int(e_q), np.array([1.0]), e_xs, e_ys, e_zs)
                         g["fn_type"] = e_fn_type
                         g["inner"]   = e_inner
                         g["p"]       = int(e_p)
                         g["q"]       = int(e_q)
                         g["label"]   = e_label
+                        g["x_shift"] = float(e_xs)
+                        g["y_shift"] = float(e_ys)
+                        g["z_shift"] = float(e_zs)
                         st.session_state[f"editing_{idx}"] = False
                         st.rerun()
                     except Exception as ex:
@@ -248,12 +243,16 @@ if not active_graphs:
     st.info("위에서 그래프를 하나 이상 활성화하세요.")
     st.stop()
 
-# 범위 자동 계산
 rng_re, rng_im = 0.0, 0.0
 results = []
 for g in active_graphs:
     try:
-        W = parse_function(g["fn_type"], g["inner"], g["p"], g["q"], x)
+        # 평행이동 값 안전하게 꺼내기 (기본값 0.0)
+        xs = g.get("x_shift", 0.0)
+        ys = g.get("y_shift", 0.0)
+        zs = g.get("z_shift", 0.0)
+        
+        W = parse_function(g["fn_type"], g["inner"], g["p"], g["q"], x, xs, ys, zs)
         Re_W = np.real(W); Im_W = np.imag(W)
         finite = np.isfinite(Re_W) & np.isfinite(Im_W)
         if np.any(finite):
@@ -267,21 +266,15 @@ rng_re = max(rng_re, 1.0) + 0.3
 rng_im = max(rng_im, 1.0) + 0.3
 traces = []
 
-# 기준면
 if show_planes:
     xg = np.array([x_min, x_max, x_max, x_min])
     traces.append(go.Mesh3d(
-        x=xg, y=[0,0,0,0],
-        z=np.array([-rng_im,-rng_im,rng_im,rng_im]),
-        color="lightblue", opacity=0.07,
-        name="Im=0 평면", showlegend=True, hoverinfo="skip",
+        x=xg, y=[0,0,0,0], z=np.array([-rng_im,-rng_im,rng_im,rng_im]),
+        color="lightblue", opacity=0.07, name="Im=0 평면", showlegend=True, hoverinfo="skip",
     ))
     traces.append(go.Mesh3d(
-        x=xg,
-        y=np.array([-rng_re,-rng_re,rng_re,rng_re]),
-        z=[0,0,0,0],
-        color="lightyellow", opacity=0.07,
-        name="Re=0 평면", showlegend=True, hoverinfo="skip",
+        x=xg, y=np.array([-rng_re,-rng_re,rng_re,rng_re]), z=[0,0,0,0],
+        color="lightyellow", opacity=0.07, name="Re=0 평면", showlegend=True, hoverinfo="skip",
     ))
 
 if show_axes:
@@ -291,68 +284,45 @@ if show_axes:
         (0,0,-rng_im,0,0,rng_im,"Im축"),
     ]:
         traces.append(go.Scatter3d(
-            x=[xs,xe], y=[ys,ye], z=[zs,ze],
-            mode="lines",
-            line=dict(color="gray", width=1, dash="dash"),
-            name=name, showlegend=False, hoverinfo="skip",
+            x=[xs,xe], y=[ys,ye], z=[zs,ze], mode="lines",
+            line=dict(color="gray", width=1, dash="dash"), name=name, showlegend=False, hoverinfo="skip",
         ))
 
-# 함수 곡선
 for idx, (g, W, Re_W, Im_W) in enumerate(results):
     color = COLORS[idx % len(COLORS)]
     finite = np.isfinite(Re_W) & np.isfinite(Im_W)
     xf, rf, imf = x[finite], Re_W[finite], Im_W[finite]
 
-    mask_real = np.abs(imf) < 1e-9
+    # 원래 그래프 기준으로 실수구간/복소구간을 나누고 싶다면 shift 빼기 전 수치로 봐야 하나,
+    # 직관적으로 현재 그려진 결과의 허수부가 0(또는 z_shift) 근처인지로 판별하도록 보완 가능합니다.
+    # 여기서는 최종 결과물의 허수부가 g["z_shift"]와 같은지를 기준으로 실수/복소 구간을 표기합니다.
+    target_z = g.get("z_shift", 0.0)
+    mask_real = np.abs(imf - target_z) < 1e-9
 
     if np.any(mask_real):
         traces.append(go.Scatter3d(
-            x=xf[mask_real], y=rf[mask_real], z=imf[mask_real],
-            mode="lines",
-            line=dict(color=color, width=line_width),
-            name=f"{g['label']}  (실수구간)",
-            hovertemplate=(
-                f"<b>{g['label']}</b><br>"
-                "x=%{x:.4f}<br>Re=%{y:.4f}<br>Im=%{z:.4f}<extra></extra>"
-            ),
+            x=xf[mask_real], y=rf[mask_real], z=imf[mask_real], mode="lines",
+            line=dict(color=color, width=line_width), name=f"{g['label']} (실수구간)",
+            hovertemplate=f"<b>{g['label']}</b><br>x=%{{x:.4f}}<br>Re=%{{y:.4f}}<br>Im=%{{z:.4f}}<extra></extra>",
         ))
-
-    mask_cplx = ~mask_real
-    if np.any(mask_cplx):
+    if np.any(~mask_real):
         traces.append(go.Scatter3d(
-            x=xf[mask_cplx], y=rf[mask_cplx], z=imf[mask_cplx],
-            mode="lines",
-            line=dict(color=color, width=line_width, dash="dot"),
-            name=f"{g['label']}  (복소구간)",
-            hovertemplate=(
-                f"<b>{g['label']}</b><br>"
-                "x=%{x:.4f}<br>Re=%{y:.4f}<br>Im=%{z:.4f}<extra></extra>"
-            ),
+            x=xf[~mask_real], y=rf[~mask_real], z=imf[~mask_real], mode="lines",
+            line=dict(color=color, width=line_width, dash="dot"), name=f"{g['label']} (복소구간)",
+            hovertemplate=f"<b>{g['label']}</b><br>x=%{{x:.4f}}<br>Re=%{{y:.4f}}<br>Im=%{{z:.4f}}<extra></extra>",
         ))
 
 fn_titles = " ,  ".join(g["label"] for g in active_graphs)
 fig = go.Figure(data=traces)
 fig.update_layout(
-    height=660,
-    margin=dict(l=0, r=0, t=50, b=0),
-    title=dict(
-        text=f"{fn_titles}",
-        x=0.5, xanchor="center", font=dict(size=14),
-    ),
+    height=660, margin=dict(l=0, r=0, t=50, b=0),
+    title=dict(text=f"{fn_titles}", x=0.5, xanchor="center", font=dict(size=14)),
     scene=dict(
-        xaxis=dict(title="x  (실수 입력)"),
-        yaxis=dict(title="y = Re(f(x))"),
-        zaxis=dict(title="z = Im(f(x))"),
-        bgcolor="rgba(14,17,23,1)",
-        camera=dict(eye=dict(x=1.8, y=1.4, z=1.0)),
-        aspectmode="auto",
+        xaxis=dict(title="x (실수 입력)"), yaxis=dict(title="y = Re(f(x))"), zaxis=dict(title="z = Im(f(x))"),
+        bgcolor="rgba(14,17,23,1)", camera=dict(eye=dict(x=1.8, y=1.4, z=1.0)), aspectmode="auto",
     ),
     paper_bgcolor="rgba(0,0,0,0)",
-    legend=dict(
-        bgcolor="rgba(30,30,30,0.7)",
-        font=dict(color="white"),
-        bordercolor="#444", borderwidth=1,
-    ),
+    legend=dict(bgcolor="rgba(30,30,30,0.7)", font=dict(color="white"), bordercolor="#444", borderwidth=1),
 )
 
 st.plotly_chart(fig, use_container_width=True)
@@ -363,41 +333,14 @@ st.subheader("특정 x 값에서 함수값 확인")
 px = st.number_input("x =", value=2.0, step=0.1, format="%.4f", key="px_calc")
 cols = st.columns(max(len(active_graphs), 1))
 for i, (g, W, Re_W, Im_W) in enumerate(results):
-    pw = parse_function(g["fn_type"], g["inner"], g["p"], g["q"], np.array([px]))[0]
+    xs = g.get("x_shift", 0.0)
+    ys = g.get("y_shift", 0.0)
+    zs = g.get("z_shift", 0.0)
+    pw = parse_function(g["fn_type"], g["inner"], g["p"], g["q"], np.array([px]), xs, ys, zs)[0]
     with cols[i % len(cols)]:
         color = COLORS[i % len(COLORS)]
-        st.markdown(
-            f'<span style="color:{color};font-weight:600">{g["label"]}</span>',
-            unsafe_allow_html=True,
-        )
+        st.markdown(f'<span style="color:{color};font-weight:600">{g["label"]}</span>', unsafe_allow_html=True)
         st.metric("Re(f)", f"{np.real(pw):.6f}")
         st.metric("Im(f)", f"{np.imag(pw):.6f}")
         st.metric("|f|",   f"{abs(pw):.6f}")
         st.caption(f"arg = {np.degrees(np.angle(pw)):.3f}°")
-
-with st.expander("수식 작성 도움말"):
-    st.markdown("""
-**자연스러운 수학 표기 그대로 입력 가능**
-
-| 입력 | 의미 |
-|------|------|
-| `2x-3` | 2x − 3 |
-| `3x^2 - 1` | 3x² − 1 |
-| `2(x+1)` | 2(x+1) |
-| `(x-1)(x+1)` | (x−1)(x+1) |
-| `x^3` | x³ |
-| `π` | 원주율 |
-
-**사용 가능한 함수**
-
-`sin(x)` · `cos(x)` · `tan(x)` · `exp(x)` · `log(x)` · `log10(x)` · `abs(x)` · `sqrt(x)`
-
-**함수 유형 예시**
-
-| 유형 | 수식 입력 | 결과 |
-|------|-----------|------|
-| √( ) | `2x - 3` | √(2x−3) |
-| √( ) | `x^2 - 4` | √(x²−4) |
-| ∛( ) | `x - 1` | ∛(x−1) |
-| ( )^(p/q) | `x`, p=3, q=4 | x^(3/4) |
-    """)
