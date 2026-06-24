@@ -113,21 +113,21 @@ st.subheader("그래프 추가 / 편집")
 
 # 새 그래프 추가
 with st.expander("➕  새 그래프 추가", expanded=False):
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        new_type = st.selectbox(
-            "함수 유형",
-            ["expr  f(x)", "sqrt  √( )", "cbrt  ∛( )", "pq  ( )^(p/q)"],
-            key="new_type",
-        )
-    with c2:
-        inner_label = "수식 f(x)" if fn_type_key == "expr" else "근호 안 수식"
-        new_inner = st.text_input(
-            inner_label,
-            value="x - 3" if fn_type_key == "expr" else "x**2 - 1",
-            key="new_inner",
-            help="x, sin, cos, exp, log, pi, e 등 사용 가능 / 2x-3, x^2 형태도 OK",
-        )
+    new_type = st.selectbox(
+        "함수 유형",
+        ["expr  f(x)", "sqrt  √( )", "cbrt  ∛( )", "pq  ( )^(p/q)"],
+        key="new_type",
+    )
+    fn_type_key = new_type.split()[0]   # "expr" | "sqrt" | "cbrt" | "pq"
+
+    inner_label = "수식 f(x)" if fn_type_key == "expr" else "근호 안 수식"
+    inner_default = "x - 3" if fn_type_key == "expr" else "x**2 - 1"
+    new_inner = st.text_input(
+        inner_label,
+        value=inner_default,
+        key="new_inner",
+        help="x, sin, cos, exp, log, pi, e 등 사용 가능 / 2x-3, x^2 형태도 OK",
+    )
 
     if fn_type_key == "pq":
         cp, cq = st.columns(2)
@@ -140,8 +140,6 @@ with st.expander("➕  새 그래프 추가", expanded=False):
 
     new_label = st.text_input("범례 이름 (선택)", value="", key="new_label",
                                placeholder="비워두면 자동 생성")
-
-    fn_type_key = new_type.split()[0]   # "expr" | "sqrt" | "cbrt" | "pq"
 
     # 미리보기 레이블
     if fn_type_key == "expr":
@@ -157,7 +155,6 @@ with st.expander("➕  새 그래프 추가", expanded=False):
     st.caption(f"레이블 미리보기: **{final_label}**")
 
     if st.button("그래프 추가 ↗"):
-        # 수식 유효성 검사
         try:
             test_x = np.array([1.0])
             parse_function(fn_type_key, new_inner, int(new_p), int(new_q), test_x)
